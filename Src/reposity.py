@@ -40,6 +40,13 @@ class reposity:
     def receipt_key():
         return "receipt_model"
     
+    """
+    Ключ для рецептов
+    """
+    @staticmethod
+    def composition_key():
+        return "receipt_item_model"
+    
 
     # TODO: Внимание! Тут можно сделать универсально
 
@@ -47,9 +54,10 @@ class reposity:
     Инициализация
     """
     def initalize(self):
-        self.__data[ reposity.range_key() ] = []
-        self.__data[ reposity.group_key() ] = []
-        self.__data[ reposity.nomenclature_key() ] = []
-        self.__data[ reposity.receipt_key() ] = []
+        keys = [key for key in self.__dir__() if key.endswith('_key')]
+        for key in keys:
+            key_method = getattr(self, key)
+            self.__data[ key_method() ] = []
+        
     
     
