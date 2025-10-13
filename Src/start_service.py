@@ -50,7 +50,6 @@ class start_service:
                 if isinstance(attribute, property):
                     properties.append(attribute)
             self.__classes_property[item] = [attr for attr in dir(item) if isinstance(getattr(item, attr), property)]
-        print(1)
 
     # Singletone
     def __new__(cls):
