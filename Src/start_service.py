@@ -90,80 +90,209 @@ class start_service:
             return False
         
     # TODO: Внимание! Все методы __convert можно сделать универсально
-    def __convert(self, data: dict, dict_key: str):
-        validator.validate(dict_key, str)
-        if dict_key not in self.__models_dict.keys():
+ 
+    """
+    Конвертирует данные из JSON в объекты моделей
+    """
+    def __convert(self, data: dict, dict_key: str) -> bool:
+        # Валидация входных параметров
+        if not self.__validate_convert_inputs(data, dict_key):
             return False
         
-        validator.validate(data, dict)
-        if dict_key not in data.keys():
-            return False
-
-        for items in data[dict_key]:
-            args = []
-            model = self.__models_dict[dict_key]
-            for item in items:
-                value = None
-                if item not in items.keys():
-                    if item.find('id') == -1:
-                        value = None
-                    elif item.find('value') == -1:
-                        value = 1
-                    else:
-                        value = ''
-                else:
-                    if item.find('id') != -1 and items[item] in self.__default_receipt_items:
-                        value = self.__default_receipt_items[items[item]]
-                    else:
-                        value = items[item]
-                args.append(value)
-
-            id = None
-            if 'id' in items.keys():
-                id = args.pop(len(args) - 1)
-
-            func_args = getfullargspec(model.create).args
-            if len(args) != len(func_args):
+        model_class = self.__models_dict[dict_key]
+        items_data = data[dict_key]
+        
+        # Обрабатываем каждый элемент данных
+        for item_data in items_data:
+            if not self.__process_single_item(item_data, model_class, dict_key):
                 return False
-            model = model.create(*args)
-
-            if id is not None:
-                model.unique_code = id
-            self.__default_receipt_items.setdefault(model.unique_code, model)
-            self.__repo.data[self.__repo_keys[dict_key]].append(model)
         
         return True
+
+    """
+    Проверяет корректность входных данных для конвертации
+    """
+    def __validate_convert_inputs(self, data: dict, dict_key: str) -> bool:
+        if not isinstance(data, dict):
+            return False
+        
+        if dict_key not in self.__models_dict:
+            return False
+        
+        if dict_key not in data:
+            return False
+        
+        return True
+
+    """
+    Обрабатывает один элемент данных и создает объект модели
+    """
+    def __process_single_item(self, item_data: dict, model_class: type, dict_key: str) -> bool:
+        try:
+            # Подготавливаем аргументы для создания модели
+            args = self.__prepare_model_arguments(item_data)
+            
+            # Извлекаем ID если есть
+            item_id = item_data.get('id')
+            
+            # Создаем модель
+            model_instance = self.__create_model_instance(model_class, args, item_id)
+            if not model_instance:
+                return False
+            
+            # Сохраняем модель
+            self.__store_model_instance(model_instance, dict_key)
+            return True
+            
+        except Exception:
+            return False
+
+    """
+    Подготавливает аргументы для создания модели
+    """
+    def __prepare_model_arguments(self, item_data: dict) -> list:
+        args = []
+        
+        for key, value in item_data.items():
+            if key == 'id':
+                continue  # ID обрабатывается отдельно
+                
+            processed_value = self.__process_argument_value(key, value, item_data)
+            args.append(processed_value)
+        
+        return args
+
+    """
+    Обрабатывает значение аргумента, подставляя ссылки на объекты при необходимости
+    """
+    def __process_argument_value(self, key: str, value: any, item_data: dict) -> any:
+        if isinstance(value, str) and 'id' in key.lower() and value in self.__default_receipt_items:
+            return self.__default_receipt_items[value]
+        
+        return value
+
+    """
+    Создает экземпляр модели с проверкой аргументов
+    """
+    def __create_model_instance(self, model_class: type, args: list, item_id: str = None):
+        try:
+            # Получаем ожидаемые аргументы конструктора
+            expected_args = getfullargspec(model_class.create).args
+            
+            """
+            Проверяем соответствие количества аргументов.
+            
+            Добавлено специально, чтобы обработать случай, когда 
+            пользователь не добавил необходимый аргумент для создания объекта модели
+            """
+            if len(args) != len(expected_args):
+                return None
+            
+            # Создаем модель
+            model_instance = model_class.create(*args)
+            
+            # Устанавливаем ID если предоставлен
+            if item_id is not None:
+                model_instance.unique_code = item_id
+                
+            return model_instance
+            
+        except Exception:
+            return None
+
+    """
+    Сохраняет созданный экземпляр модели в репозиторий
+    """
+    def __store_model_instance(self, model_instance, dict_key: str):
+
+        self.__default_receipt_items[model_instance.unique_code] = model_instance
+        
+        # Добавляем в соответствующий репозиторий
+        repo_key = self.__repo_keys[dict_key]
+        self.__repo.data[repo_key].append(model_instance)
 
     # TODO: Внимание! Тут нужно проверки добавить и обработку исключений чтобы возвращать False
 
-    # Обработать полученный словарь    
+    """
+    Конвертирует данные JSON в объекты моделей и создает рецепт
+    """
     def convert(self, data: dict) -> bool:
         validator.validate(data, dict)
-
-        # 1 Созданим рецепт
-        cooking_time = data.get('cooking_time', '')
-        portions = int(data.get('portions', 0))
-        name = data.get('name', 'НЕИЗВЕСТНО')
-        self.__default_receipt = receipt_model.create(name, cooking_time, portions)
-
-        # Загрузим шаги приготовления
-        steps = data.get('steps', [])
-        for step in steps:
-            if step.strip() != "":
-                self.__default_receipt.steps.append( step )
-
-        # Загружаем данные для моделей из json  
-        for key in self.__models_dict.keys():
-            if not self.__convert(data, key):
-                raise convertation_exception(f'Ошибка при конвертации модели {key}')
-
-        # Добавляем в рецепт ингридиенты
-        for item in self.__repo.data[reposity.composition_key()]:
-            self.__default_receipt.composition.append(item)
+        
+        try:
+            # Основной поток конвертации
+            return self.__perform_conversion_pipeline(data)
             
-        # Сохраняем рецепт
-        self.__repo.data[reposity.receipt_key()].append(self.__default_receipt)
+        except Exception as e:
+            print(f"Ошибка при конвертации данных: {e}")
+            raise convertation_exception(f"Ошибка конвертации: {e}")
+
+    """
+    Выполняет последовательность шагов конвертации
+    """
+    def __perform_conversion_pipeline(self, data: dict) -> bool:
+        conversion_steps = [
+            lambda: self.__create_receipt_from_data(data),
+            lambda: self.__convert_model_data(data),
+            lambda: self.__build_receipt_composition(),
+            lambda: self.__store_final_receipt()
+        ]
+        
+        for step in conversion_steps:
+            if not step():
+                return False
+                
         return True
+
+    """
+    Создает рецепт из данных
+    """
+    def __create_receipt_from_data(self, data: dict) -> bool:
+        try:
+            self.__default_receipt = receipt_model.create(
+                data.get('name', 'НЕИЗВЕСТНО'),
+                data.get('cooking_time', ''),
+                int(data.get('portions', 0))
+            )
+            
+            # Добавляем шаги приготовления
+            steps = [step.strip() for step in data.get('steps', []) if step.strip()]
+            self.__default_receipt.steps.extend(steps)
+            
+            return True
+        except Exception:
+            return False
+
+    """
+    Конвертирует данные всех моделей
+    """
+    def __convert_model_data(self, data: dict) -> bool:
+        for model_key in self.__models_dict.keys():
+            if not self.__convert(data, model_key):
+                return False
+        return True
+
+    """
+    Добавляет ингредиенты в рецепт
+    """
+    def __build_receipt_composition(self) -> bool:
+        try:
+            composition = self.__repo.data[reposity.composition_key()]
+            self.__default_receipt.composition.extend(composition)
+            return True
+        except Exception:
+            return False
+
+    """
+    Сохраняет финальный рецепт
+    """
+    def __store_final_receipt(self) -> bool:
+        try:
+            receipt_key = reposity.receipt_key()
+            self.__repo.data[receipt_key].append(self.__default_receipt)
+            return True
+        except Exception:
+            return False
 
     """
     Стартовый набор данных
