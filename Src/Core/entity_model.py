@@ -19,7 +19,6 @@ class entity_model(abstact_model):
         validator.validate(value, str)
         self.__name = value.strip()
 
-
     # Фабричный метод
     @staticmethod
     def create(name:str):

@@ -25,7 +25,6 @@ class abstact_model(ABC):
         validator.validate(value, str)
         self.__unique_code = value.strip()
     
-
     """
     Перегрузка штатного варианта сравнения
     """
